@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ドラッグでリアクション</title>
+<style>
+  :root {
+    --bg: #f6f1ea;
+    --panel: #ffffff;
+    --ink: #3b2f28;
+    --muted: #8a7d72;
+    --line: #e4dbd0;
+    --accent: #e0745a;
+    --accent-soft: #fbe3dc;
+    --stage: #fffaf3;
+    --hot: rgba(224, 116, 90, .18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1f1b19; --panel: #2a2522; --ink: #f1e8e0; --muted: #a8998c;
+      --line: #3d3631; --accent: #f08a70; --accent-soft: #4a2d25; --stage: #2f2926;
+      --hot: rgba(240, 138, 112, .22);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0; margin-right: auto; }
+  button, .btn {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.on { background: var(--accent-soft); border-color: var(--accent); }
+  button.small { padding: 2px 8px; font-size: 12px; }
+  .btn input[type=file] { display: none; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; padding: 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+
+  .stage-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .stage {
+    position: relative; width: min(100%, 480px); aspect-ratio: 4 / 5;
+    background: var(--stage); border: 1px solid var(--line); border-radius: 16px;
+    overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .stage img.frame {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: fill; pointer-events: none; -webkit-user-drag: none;
+  }
+  .stage.squish img.frame { animation: squish .35s ease-out; }
+  @keyframes squish {
+    0% { transform: scale(1, 1); } 30% { transform: scale(1.04, .95); }
+    60% { transform: scale(.98, 1.03); } 100% { transform: scale(1, 1); }
+  }
+  .hotspot {
+    position: absolute; cursor: grab; border-radius: 12px; touch-action: none;
+  }
+  .hotspot:active { cursor: grabbing; }
+  .stage.editing .hotspot {
+    background: var(--hot); outline: 2px dashed var(--accent); cursor: move;
+  }
+  .stage.editing .hotspot.selected { outline-style: solid; }
+  .hotspot .label {
+    display: none; position: absolute; left: 4px; top: 4px; font-size: 11px;
+    background: var(--accent); color: #fff; padding: 0 6px; border-radius: 6px; pointer-events: none;
+  }
+  .stage.editing .hotspot .label { display: block; }
+  .hotspot .handle {
+    display: none; position: absolute; right: -6px; bottom: -6px; width: 14px; height: 14px;
+    background: var(--accent); border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize;
+  }
+  .stage.editing .hotspot .handle { display: block; }
+  .pull {
+    position: absolute; pointer-events: none; border-radius: 12px;
+    background-repeat: no-repeat; will-change: transform; z-index: 5;
+    filter: drop-shadow(0 6px 8px rgba(0,0,0,.18));
+  }
+  .pull.back { transition: transform .28s cubic-bezier(.3, 1.6, .5, 1), opacity .28s; }
+  .hint { color: var(--muted); font-size: 12px; text-align: center; }
+
+  aside { display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+  .card h2 input { flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--ink);
+    background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 4px; }
+  .card h2 input:hover, .card h2 input:focus { border-color: var(--line); outline: none; }
+  .sub { font-size: 12px; color: var(--muted); margin: 8px 0 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sub label { display: inline-flex; gap: 4px; align-items: center; }
+  .sub input[type=number] { width: 56px; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 1px 4px; }
+  .frames {
+    display: flex; gap: 6px; flex-wrap: wrap; min-height: 60px; padding: 6px;
+    border: 1px dashed var(--line); border-radius: 8px;
+  }
+  .frames.dragover { border-color: var(--accent); background: var(--accent-soft); }
+  .frames .empty { color: var(--muted); font-size: 12px; align-self: center; }
+  .thumb {
+    position: relative; width: 52px; height: 52px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--stage); overflow: hidden; cursor: grab;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .thumb .no { position: absolute; left: 2px; bottom: 0; font-size: 10px; color: var(--muted); }
+  .thumb .del {
+    position: absolute; right: 1px; top: 1px; width: 16px; height: 16px; line-height: 14px; padding: 0;
+    font-size: 11px; border-radius: 50%; border: none; background: rgba(0,0,0,.55); color: #fff;
+  }
+  .thumb.dragging { opacity: .4; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+  body:not(.edit) .edit-only { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ドラッグでリアクション</h1>
+  <button id="editBtn">✏️ 編集モード</button>
+  <button id="saveBtn">保存</button>
+  <button id="exportBtn">JSON書き出し</button>
+  <label class="btn">JSON読み込み<input id="importInput" type="file" accept="application/json,.json"></label>
+  <button id="resetBtn">初期化</button>
+</header>
+
+<main>
+  <section class="stage-wrap">
+    <div class="stage" id="stage">
+      <img class="frame" id="frame" alt="キャラクター" draggable="false">
+    </div>
+    <p class="hint" id="hint">キャラの頭・手・おなかをドラッグして離してみてください</p>
+  </section>
+
+  <aside id="panel"></aside>
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* =====================================================================
+ *  画像の差し替え方法
+ *  1) 画面右の各パネルに画像ファイルをドラッグ＆ドロップ（またはクリックで選択）
+ *     → 複数枚まとめて入れるとファイル名順にコマとして並びます（01.png, 02.png…）
+ *  2) もしくは下の DEFAULT_CONFIG の frames を "images/xxx.png" のような
+ *     パスに書き換えてください（index.html と同じ場所に images フォルダを置く）
+ *
+ *  rect は ステージに対する % 指定（x, y, w, h）です。
+ *  hold     : ドラッグ中に流すアニメ（省略可）
+ *  reaction : ドロップしたときに流すアニメ（1枚1枚のコマ）
+ * ===================================================================== */
+
+// ---- 仮キャラ（SVG）生成。自分の画像に差し替えれば不要になります ----
+function charSVG(opt) {
+  const p = Object.assign({
+    eyes: 'open', mouth: 'smile', blush: false, armL: -20, armR: 20,
+    bounce: 0, tilt: 0, fx: '', sweat: false, sx: 1, sy: 1
+  }, opt);
+  const S = '#5a3d2b', F = '#fff1d6', C = '#ffb4a2';
+  const eye = (x) => {
+    switch (p.eyes) {
+      case 'closed': return `<path d="M${x-13} 186 q13 10 26 0" fill="none" stroke="${S}" stroke-width="6" stroke-linecap="round"/>`;
+      case 'happy':  return `<path d="M${x-13} 192 q13 -18 26 0" fill="none" stroke="${S}" stroke-width="6" stroke-linecap="round"/>`;
+      case 'wide':   return `<circle cx="${x}" cy="186" r="17" fill="#fff" stroke="${S}" stroke-width="5"/><circle cx="${x}" cy="188" r="6" fill="${S}"/>`;
+      case 'blink':  return `<line x1="${x-12}" y1="188" x2="${x+12}" y2="188" stroke="${S}" stroke-width="6" stroke-linecap="round"/>`;
+      case 'swirl':  return `<path d="M${x} 188 m-4 0 a4 4 0 1 1 8 0 a8 8 0 1 1 -16 0 a12 12 0 1 1 24 0" fill="none" stroke="${S}" stroke-width="4"/>`;
+      default:       return `<ellipse cx="${x}" cy="186" rx="10" ry="15" fill="${S}"/><circle cx="${x+3}" cy="180" r="4" fill="#fff"/>`;
+    }
+  };
+  const mouth = {
+    smile: `<path d="M186 222 q14 14 28 0" fill="none" stroke="${S}" stroke-width="6" stroke-linecap="round"/>`,
+    open:  `<path d="M182 220 q18 30 36 0 z" fill="#c4574a" stroke="${S}" stroke-width="5" stroke-linejoin="round"/>`,
+    o:     `<ellipse cx="200" cy="228" rx="9" ry="11" fill="#c4574a" stroke="${S}" stroke-width="5"/>`,
+    wavy:  `<path d="M178 226 l8 -6 l8 6 l8 -6 l8 6 l8 -6 l8 6" fill="none" stroke="${S}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`,
+    flat:  `<line x1="188" y1="226" x2="212" y2="226" stroke="${S}" stroke-width="6" stroke-linecap="round"/>`
+  }[p.mouth];
+  const blush = p.blush ? `<ellipse cx="135" cy="215" rx="20" ry="11" fill="${C}" opacity=".8"/><ellipse cx="265" cy="215" rx="20" ry="11" fill="${C}" opacity=".8"/>` : '';
+  const sweat = p.sweat ? `<path d="M300 120 q12 20 0 28 q-12 -8 0 -28z" fill="#8fd0ff" stroke="${S}" stroke-width="3"/>` : '';
+  const fx = p.fx ? `<text x="320" y="90" font-size="56" font-family="sans-serif" fill="#e0745a" font-weight="700">${p.fx}</text>` : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="400" height="500">
+  <g transform="translate(0 ${p.bounce}) translate(200 470) scale(${p.sx} ${p.sy}) translate(-200 -470)">
+    <ellipse cx="200" cy="478" rx="110" ry="12" fill="#000" opacity=".08"/>
+    <ellipse cx="150" cy="455" rx="38" ry="22" fill="${F}" stroke="${S}" stroke-width="6"/>
+    <ellipse cx="250" cy="455" rx="38" ry="22" fill="${F}" stroke="${S}" stroke-width="6"/>
+    <g transform="rotate(${p.armL} 125 320)"><rect x="40" y="302" width="95" height="36" rx="18" fill="${F}" stroke="${S}" stroke-width="6"/></g>
+    <g transform="rotate(${p.armR} 275 320)"><rect x="265" y="302" width="95" height="36" rx="18" fill="${F}" stroke="${S}" stroke-width="6"/></g>
+    <ellipse cx="200" cy="360" rx="105" ry="100" fill="${F}" stroke="${S}" stroke-width="6"/>
+    <ellipse cx="200" cy="375" rx="58" ry="52" fill="#fff" opacity=".8"/>
+    <g transform="rotate(${p.tilt} 200 290)">
+      <circle cx="122" cy="98" r="34" fill="${F}" stroke="${S}" stroke-width="6"/>
+      <circle cx="278" cy="98" r="34" fill="${F}" stroke="${S}" stroke-width="6"/>
+      <circle cx="122" cy="98" r="16" fill="${C}"/>
+      <circle cx="278" cy="98" r="16" fill="${C}"/>
+      <circle cx="200" cy="190" r="102" fill="${F}" stroke="${S}" stroke-width="6"/>
+      ${blush}${eye(160)}${eye(240)}${mouth}${sweat}
+    </g>
+    ${fx}
+  </g>
+</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+const f = charSVG;
+
+const DEFAULT_CONFIG = {
+  idle: {
+    frames: [f(), f(), f(), f(), f(), f(), f({ eyes: 'blink' }), f()],
+    fps: 4
+  },
+  parts: [
+    {
+      id: 'head', name: '頭（なでなで）',
+      rect: { x: 22, y: 10, w: 56, h: 46 },
+      hold: { frames: [f({ eyes: 'closed', blush: true })], fps: 4 },
+      reaction: {
+        frames: [
+          f({ eyes: 'closed', blush: true, tilt: -6 }),
+          f({ eyes: 'happy', mouth: 'open', blush: true, tilt: -10, fx: '♪' }),
+          f({ eyes: 'happy', mouth: 'open', blush: true, tilt: 0, bounce: -10, fx: '♪' }),
+          f({ eyes: 'happy', mouth: 'open', blush: true, tilt: 10, fx: '♡' }),
+          f({ eyes: 'happy', mouth: 'open', blush: true, tilt: 0, bounce: -10, fx: '♡' }),
+          f({ eyes: 'happy', mouth: 'smile', blush: true, tilt: -6 }),
+          f({ eyes: 'happy', mouth: 'smile', blush: true })
+        ],
+        fps: 7, loops: 1
+      }
+    },
+    {
+      id: 'handL', name: '左手（あくしゅ）',
+      rect: { x: 8, y: 56, w: 26, h: 16 },
+      hold: { frames: [f({ eyes: 'wide', mouth: 'o', armL: 10, fx: '!' })], fps: 4 },
+      reaction: {
+        frames: [
+          f({ armL: 40, mouth: 'open' }), f({ armL: 80, mouth: 'open', eyes: 'happy' }),
+          f({ armL: 50, mouth: 'open', eyes: 'happy' }), f({ armL: 85, mouth: 'open', eyes: 'happy' }),
+          f({ armL: 50, mouth: 'open', eyes: 'happy' }), f({ armL: 80, mouth: 'smile', eyes: 'happy', fx: '♪' }),
+          f({ armL: 20, eyes: 'happy' })
+        ],
+        fps: 9, loops: 1
+      }
+    },
+    {
+      id: 'handR', name: '右手（ばいばい）',
+      rect: { x: 66, y: 56, w: 26, h: 16 },
+      hold: { frames: [f({ eyes: 'wide', mouth: 'o', armR: -10, fx: '!' })], fps: 4 },
+      reaction: {
+        frames: [
+          f({ armR: -40, mouth: 'open' }), f({ armR: -80, mouth: 'open', eyes: 'happy' }),
+          f({ armR: -50, mouth: 'open', eyes: 'happy' }), f({ armR: -85, mouth: 'open', eyes: 'happy' }),
+          f({ armR: -50, mouth: 'open', eyes: 'happy' }), f({ armR: -80, mouth: 'smile', eyes: 'happy', fx: '♪' }),
+          f({ armR: -20, eyes: 'happy' })
+        ],
+        fps: 9, loops: 1
+      }
+    },
+    {
+      id: 'belly', name: 'おなか（くすぐり）',
+      rect: { x: 32, y: 62, w: 36, h: 26 },
+      hold: { frames: [f({ eyes: 'wide', mouth: 'wavy', sweat: true }), f({ eyes: 'wide', mouth: 'wavy', sweat: true, bounce: -4 })], fps: 8 },
+      reaction: {
+        frames: [
+          f({ eyes: 'closed', mouth: 'open', sx: 1.06, sy: .94, armL: 30, armR: -30 }),
+          f({ eyes: 'happy', mouth: 'open', bounce: -24, armL: 60, armR: -60, fx: '!' }),
+          f({ eyes: 'closed', mouth: 'open', sx: 1.04, sy: .96, armL: 20, armR: -20 }),
+          f({ eyes: 'happy', mouth: 'open', bounce: -16, armL: 55, armR: -55, blush: true }),
+          f({ eyes: 'swirl', mouth: 'wavy', sweat: true, blush: true }),
+          f({ eyes: 'swirl', mouth: 'wavy', sweat: true, blush: true, tilt: 6 }),
+          f({ eyes: 'closed', mouth: 'smile', blush: true })
+        ],
+        fps: 8, loops: 1
+      }
+    }
+  ]
+};
+
+// ======================= ここから本体 =======================
+const STORAGE_KEY = 'drag-reaction-config-v1';
+const $ = (s) => document.querySelector(s);
+const stage = $('#stage'), frameImg = $('#frame'), panel = $('#panel');
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+let config = loadConfig();
+let editing = false;
+let selectedId = null;
+
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return normalize(JSON.parse(raw));
+  } catch (e) { /* 保存データなし */ }
+  return clone(DEFAULT_CONFIG);
+}
+function normalize(c) {
+  c.idle = c.idle || { frames: [], fps: 4 };
+  c.parts = (c.parts || []).map((p, i) => ({
+    id: p.id || 'part' + Date.now() + i,
+    name: p.name || 'パーツ',
+    rect: p.rect || { x: 40, y: 40, w: 20, h: 20 },
+    hold: p.hold || { frames: [], fps: 4 },
+    reaction: p.reaction || { frames: [], fps: 8, loops: 1 }
+  }));
+  return c;
+}
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ---------------- アニメーション再生 ----------------
+const player = { anim: null, timer: null, index: 0, loop: 0, onEnd: null };
+const cache = new Map();
+function preload(frames) {
+  frames.forEach((src) => {
+    if (!cache.has(src)) { const im = new Image(); im.src = src; cache.set(src, im); }
+  });
+}
+function play(anim, { loops = 0, onEnd = null } = {}) {
+  clearInterval(player.timer);
+  if (!anim || !anim.frames || !anim.frames.length) { onEnd && onEnd(); return; }
+  preload(anim.frames);
+  Object.assign(player, { anim, index: 0, loop: 0, onEnd });
+  show(anim.frames[0]);
+  const ms = 1000 / Math.max(0.5, Number(anim.fps) || 8);
+  player.timer = setInterval(() => {
+    player.index++;
+    if (player.index >= anim.frames.length) {
+      player.loop++;
+      if (loops > 0 && player.loop >= loops) {
+        clearInterval(player.timer);
+        const cb = player.onEnd; player.onEnd = null; cb && cb();
+        return;
+      }
+      player.index = 0;
+    }
+    show(anim.frames[player.index]);
+  }, ms);
+}
+function show(src) { if (frameImg.getAttribute('src') !== src) frameImg.src = src; }
+function playIdle() {
+  if (config.idle.frames.length) play(config.idle);
+  else { clearInterval(player.timer); frameImg.removeAttribute('src'); }
+}
+// 最初の画像の縦横比にステージを合わせる
+frameImg.addEventListener('load', () => {
+  if (!stage.dataset.ratio) {
+    const r = frameImg.naturalWidth / frameImg.naturalHeight;
+    if (r && isFinite(r)) { stage.style.aspectRatio = `${frameImg.naturalWidth} / ${frameImg.naturalHeight}`; stage.dataset.ratio = r; }
+  }
+});
+
+// ---------------- ホットスポット（掴める部分） ----------------
+function renderHotspots() {
+  stage.querySelectorAll('.hotspot').forEach((h) => h.remove());
+  config.parts.forEach((part) => {
+    const el = document.createElement('div');
+    el.className = 'hotspot' + (part.id === selectedId ? ' selected' : '');
+    el.dataset.id = part.id;
+    placeHotspot(el, part.rect);
+    const label = document.createElement('span');
+    label.className = 'label'; label.textContent = part.name;
+    const handle = document.createElement('div');
+    handle.className = 'handle';
+    el.append(label, handle);
+    el.addEventListener('pointerdown', (e) => onHotspotDown(e, part, el, e.target === handle));
+    stage.appendChild(el);
+  });
+}
+function placeHotspot(el, r) {
+  Object.assign(el.style, { left: r.x + '%', top: r.y + '%', width: r.w + '%', height: r.h + '%' });
+}
+
+function onHotspotDown(e, part, el, isHandle) {
+  e.preventDefault();
+  el.setPointerCapture(e.pointerId);
+  const box = stage.getBoundingClientRect();
+  const start = { x: e.clientX, y: e.clientY, rect: { ...part.rect } };
+
+  if (editing) {
+    select(part.id);
+    const move = (ev) => {
+      const dx = (ev.clientX - start.x) / box.width * 100;
+      const dy = (ev.clientY - start.y) / box.height * 100;
+      const r = part.rect, s = start.rect;
+      if (isHandle) {
+        r.w = clamp(s.w + dx, 3, 100 - s.x); r.h = clamp(s.h + dy, 3, 100 - s.y);
+      } else {
+        r.x = clamp(s.x + dx, 0, 100 - s.w); r.y = clamp(s.y + dy, 0, 100 - s.h);
+      }
+      roundRect(r); placeHotspot(el, r);
+    };
+    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    return;
+  }
+
+  // --- 通常モード：掴んで引っぱる ---
+  const r = part.rect;
+  const px = { x: r.x / 100 * box.width, y: r.y / 100 * box.height, w: r.w / 100 * box.width, h: r.h / 100 * box.height };
+  const pull = document.createElement('div');
+  pull.className = 'pull';
+  Object.assign(pull.style, {
+    left: px.x + 'px', top: px.y + 'px', width: px.w + 'px', height: px.h + 'px',
+    backgroundImage: `url("${frameImg.src}")`,
+    backgroundSize: `${box.width}px ${box.height}px`,
+    backgroundPosition: `${-px.x}px ${-px.y}px`
+  });
+  stage.appendChild(pull);
+  if (part.hold.frames.length) play(part.hold);
+
+  const maxPull = Math.min(box.width, box.height) * 0.28;
+  let dist = 0;
+  const move = (ev) => {
+    const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+    dist = Math.hypot(dx, dy);
+    // ゴムのように伸びる：遠くに引っぱるほど重くなる
+    const k = dist ? maxPull * (1 - Math.exp(-dist / maxPull)) / dist : 0;
+    const tx = dx * k, ty = dy * k;
+    const stretch = 1 + Math.min(dist / maxPull, 1) * 0.15;
+    const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    pull.style.transform = `translate(${tx}px, ${ty}px) rotate(${ang}deg) scaleX(${stretch}) rotate(${-ang}deg)`;
+  };
+  const up = () => {
+    el.removeEventListener('pointermove', move);
+    el.removeEventListener('pointerup', up);
+    el.removeEventListener('pointercancel', up);
+    pull.classList.add('back');
+    pull.style.transform = 'translate(0, 0)';
+    pull.style.opacity = '0';
+    setTimeout(() => pull.remove(), 300);
+    if (dist > 12) {
+      stage.classList.remove('squish'); void stage.offsetWidth; stage.classList.add('squish');
+      play(part.reaction, { loops: Math.max(1, Number(part.reaction.loops) || 1), onEnd: playIdle });
+    } else {
+      playIdle();
+    }
+  };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+}
+const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+function roundRect(r) { for (const k in r) r[k] = Math.round(r[k] * 10) / 10; }
+
+// ---------------- 設定パネル ----------------
+function renderPanel() {
+  panel.innerHTML = '';
+
+  const idleCard = card('待機アニメ（ふだんの絵）', null);
+  idleCard.append(animEditor(config.idle, { loopsField: false, label: 'コマ（1枚目が基準の大きさになります）' }));
+  panel.append(idleCard);
+
+  config.parts.forEach((part) => {
+    const c = card(part.name, part);
+    c.append(
+      animEditor(part.reaction, { loopsField: true, label: 'ドロップ時のリアクション' }),
+      animEditor(part.hold, { loopsField: false, label: 'ドラッグ中（省略可）' })
+    );
+    const row = document.createElement('div'); row.className = 'row edit-only';
+    const del = button('このパーツを削除', () => {
+      if (!confirm(`「${part.name}」を削除しますか？`)) return;
+      config.parts = config.parts.filter((p) => p !== part);
+      renderAll();
+    }, 'small');
+    row.append(del); c.append(row);
+    panel.append(c);
+  });
+
+  const add = button('＋ パーツを追加', () => {
+    const id = 'part' + Date.now();
+    config.parts.push(normalize({ parts: [{ id, name: '新しいパーツ', rect: { x: 40, y: 40, w: 20, h: 20 } }] }).parts[0]);
+    if (!editing) toggleEdit(true);
+    selectedId = id;
+    renderAll();
+    toast('ステージ上の四角をドラッグして位置を合わせてください');
+  });
+  panel.append(add);
+}
+
+function card(title, part) {
+  const c = document.createElement('section');
+  c.className = 'card' + (part && part.id === selectedId ? ' selected' : '');
+  if (part) c.dataset.id = part.id;
+  const h = document.createElement('h2');
+  if (part) {
+    const inp = document.createElement('input');
+    inp.value = part.name;
+    inp.addEventListener('input', () => {
+      part.name = inp.value;
+      const lab = stage.querySelector(`.hotspot[data-id="${part.id}"] .label`);
+      if (lab) lab.textContent = part.name;
+    });
+    inp.addEventListener('focus', () => select(part.id));
+    h.append(inp);
+  } else h.textContent = title;
+  c.append(h);
+  return c;
+}
+
+function animEditor(anim, { loopsField, label }) {
+  const wrap = document.createElement('div');
+  const sub = document.createElement('div'); sub.className = 'sub';
+  const t = document.createElement('span'); t.textContent = label;
+  sub.append(t, numField('fps', anim, 'fps', 0.5, 60));
+  if (loopsField) sub.append(numField('回数', anim, 'loops', 1, 20));
+  wrap.append(sub);
+
+  const list = document.createElement('div'); list.className = 'frames';
+  const redraw = () => {
+    list.innerHTML = '';
+    if (!anim.frames.length) {
+      const em = document.createElement('span'); em.className = 'empty';
+      em.textContent = 'ここに画像をドロップ（複数可・ファイル名順）';
+      list.append(em);
+    }
+    anim.frames.forEach((src, i) => {
+      const th = document.createElement('div'); th.className = 'thumb'; th.draggable = true;
+      const im = document.createElement('img'); im.src = src; im.alt = '';
+      const no = document.createElement('span'); no.className = 'no'; no.textContent = i + 1;
+      const del = document.createElement('button'); del.className = 'del'; del.textContent = '×'; del.title = 'このコマを削除';
+      del.addEventListener('click', () => { anim.frames.splice(i, 1); redraw(); if (anim === config.idle) playIdle(); });
+      th.addEventListener('click', (e) => { if (e.target !== del) show(src); });
+      // コマの並べ替え
+      th.addEventListener('dragstart', (e) => { th.classList.add('dragging'); e.dataTransfer.setData('text/frame-index', String(i)); });
+      th.addEventListener('dragend', () => th.classList.remove('dragging'));
+      th.addEventListener('dragover', (e) => e.preventDefault());
+      th.addEventListener('drop', (e) => {
+        const from = e.dataTransfer.getData('text/frame-index');
+        if (from === '') return;
+        e.preventDefault(); e.stopPropagation();
+        const [m] = anim.frames.splice(Number(from), 1);
+        anim.frames.splice(i, 0, m); redraw();
+      });
+      th.append(im, no, del); list.append(th);
+    });
+  };
+  redraw();
+
+  list.addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) list.classList.add('dragover'); });
+  list.addEventListener('dragleave', () => list.classList.remove('dragover'));
+  list.addEventListener('drop', async (e) => {
+    e.preventDefault(); list.classList.remove('dragover');
+    if (e.dataTransfer.files.length) await addFiles(anim, e.dataTransfer.files, redraw);
+  });
+  wrap.append(list);
+
+  const row = document.createElement('div'); row.className = 'row';
+  const pick = document.createElement('label'); pick.className = 'btn small';
+  pick.textContent = '画像を追加';
+  const fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.multiple = true;
+  fi.addEventListener('change', async () => { await addFiles(anim, fi.files, redraw); fi.value = ''; });
+  pick.append(fi);
+  const replace = document.createElement('label'); replace.className = 'btn small';
+  replace.textContent = '全部入れ替え';
+  const fi2 = document.createElement('input'); fi2.type = 'file'; fi2.accept = 'image/*'; fi2.multiple = true;
+  fi2.addEventListener('change', async () => { anim.frames = []; await addFiles(anim, fi2.files, redraw); fi2.value = ''; });
+  replace.append(fi2);
+  const test = button('▶ 再生', () => play(anim, { loops: Math.max(1, Number(anim.loops) || 1), onEnd: playIdle }), 'small');
+  const clear = button('クリア', () => { anim.frames = []; redraw(); if (anim === config.idle) playIdle(); }, 'small');
+  row.append(pick, replace, test, clear);
+  wrap.append(row);
+  return wrap;
+}
+
+function numField(label, obj, key, min, max) {
+  const l = document.createElement('label');
+  const inp = document.createElement('input');
+  inp.type = 'number'; inp.min = min; inp.max = max; inp.step = key === 'fps' ? 0.5 : 1;
+  inp.value = obj[key] ?? (key === 'loops' ? 1 : 8);
+  inp.addEventListener('change', () => {
+    obj[key] = clamp(Number(inp.value) || min, min, max);
+    inp.value = obj[key];
+    if (obj === config.idle) playIdle();
+  });
+  l.append(label + ' ', inp);
+  return l;
+}
+function button(text, onClick, cls) {
+  const b = document.createElement('button'); b.textContent = text;
+  if (cls) b.className = cls;
+  b.addEventListener('click', onClick); return b;
+}
+
+function readFile(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result); fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+}
+async function addFiles(anim, fileList, redraw) {
+  const files = [...fileList].filter((f) => f.type.startsWith('image/'))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (!files.length) return toast('画像ファイルを選んでください');
+  for (const file of files) anim.frames.push(await readFile(file));
+  redraw();
+  if (anim === config.idle) { delete stage.dataset.ratio; playIdle(); }
+  toast(`${files.length}枚追加しました（「保存」で次回も残ります）`);
+}
+
+function select(id) {
+  selectedId = id;
+  stage.querySelectorAll('.hotspot').forEach((h) => h.classList.toggle('selected', h.dataset.id === id));
+  panel.querySelectorAll('.card').forEach((c) => c.classList.toggle('selected', c.dataset.id === id));
+  const c = panel.querySelector(`.card[data-id="${id}"]`);
+  if (c && editing) c.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function toggleEdit(force) {
+  editing = typeof force === 'boolean' ? force : !editing;
+  stage.classList.toggle('editing', editing);
+  document.body.classList.toggle('edit', editing);
+  $('#editBtn').classList.toggle('on', editing);
+  $('#hint').textContent = editing
+    ? '編集モード：四角をドラッグで移動、右下の丸で大きさ変更'
+    : 'キャラの頭・手・おなかをドラッグして離してみてください';
+  if (editing) playIdle();
+}
+
+function renderAll() {
+  renderHotspots(); renderPanel();
+  config.parts.forEach((p) => { preload(p.reaction.frames); preload(p.hold.frames); });
+  playIdle();
+}
+
+// ---------------- ヘッダーのボタン ----------------
+$('#editBtn').addEventListener('click', () => toggleEdit());
+$('#saveBtn').addEventListener('click', () => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    toast('ブラウザに保存しました');
+  } catch (e) {
+    toast('容量が足りず保存できませんでした。「JSON書き出し」で保存してください');
+  }
+});
+$('#exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'character-config.json';
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$('#importInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    config = normalize(JSON.parse(await file.text()));
+    delete stage.dataset.ratio; renderAll(); toast('読み込みました');
+  } catch (err) { toast('JSONを読み込めませんでした'); }
+  e.target.value = '';
+});
+$('#resetBtn').addEventListener('click', () => {
+  if (!confirm('最初の状態に戻しますか？（保存データも消えます）')) return;
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  config = clone(DEFAULT_CONFIG); selectedId = null;
+  delete stage.dataset.ratio; renderAll();
+});
+
+renderAll();
+</script>
+</body>
+</html>
